@@ -1,3 +1,5 @@
+# warning "未テストなPPS AleartやStatus Getが含まれる"
+
 // ===================================================================================
 // USB PD SINK Handler for CH32X035
 // ===================================================================================
@@ -196,9 +198,9 @@ uint8_t  PD_Loop(void);                         // Main Loop function, handles U
 uint8_t  PD_setVoltage(uint16_t voltage);       // Set specified voltage (in millivolts)
 
 uint8_t  PD_setPPS(uint16_t voltage,uint16_t current); // Set specified voltage and current (in millivolts and milliampere)
-uint8_t  PD_setEPRMode(uint8_t enable);         // Enter/Exit EPR Mode
-uint8_t  PD_setEPRVoltage(uint16_t voltage, uint16_t current); // Set EPR Voltage/Current
-PD_epr_mode_t PD_getEPRMode(void);                      // Get current EPR Mode status
+uint8_t  PD_setEPRMode(uint8_t enable);         // Enter EPR Mode, exit is not supported yet
+uint8_t  PD_getEPRCapable(void);                // Check if Source advertises EPR Mode capable
+PD_epr_mode_t PD_getEPRMode(void);              // Get current EPR Mode status
 
 uint8_t  PD_getPDONum(void);                    // Get total number of PDOs
 uint8_t  PD_getFixedNum(void);                  // Get number of fixed power PDOs
