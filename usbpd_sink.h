@@ -80,14 +80,23 @@ typedef struct {
 typedef struct {
   uint16_t MinVoltage;
   uint16_t MaxVoltage;
+  uint16_t Current_9to15V;
+  uint16_t Current_15to20V;
+  uint8_t  Index;
+} SPRAVSSourceCap_t;
+
+typedef struct {
+  uint16_t MinVoltage;
+  uint16_t MaxVoltage;
   uint8_t  PDP;
   uint8_t  Index;
-} AVSSourceCap_t;
+} EPRAVSSourceCap_t;
 
 typedef enum {
   PDO_TYPE_FIXED = 0u,
   PDO_TYPE_PPS,
-  PDO_TYPE_AVS,
+  PDO_TYPE_SPR_AVS,
+  PDO_TYPE_EPR_AVS,
   PDO_TYPE_UNKNOWN
 } PD_pdo_type_t;
 
@@ -102,15 +111,16 @@ typedef enum {
   CC_WAIT_PS_RDY,
   CC_PS_RDY,
   CC_GET_SOURCE_CAP,
+  CC_WAIT_SRC_CAP,
   CC_EPR_MODE_ENTRY,
-  CC_EPR_SOURCE_CAP,
+  CC_SEND_CHUNK_REQUEST,
 } cc_state_t;
 
 // Request Types
 typedef enum {
   REQ_FIXED = 0,
   REQ_PPS,
-  REQ_EPR_FIXED,
+  REQ_SPR_AVS,
   REQ_EPR_AVS,
 } pd_request_type_t;
 
@@ -143,11 +153,13 @@ typedef struct {
   volatile uint8_t    CC2_ConnectTimes;
   FixedSourceCap_t*   FixedSourceCap;
   PPSSourceCap_t*     PPSSourceCap;
-  AVSSourceCap_t*     AVSSourceCap;
+  SPRAVSSourceCap_t*  SPRAVSSourceCap;
+  EPRAVSSourceCap_t*  EPRAVSSourceCap;
   volatile uint8_t    SourcePDONum;
   volatile uint8_t    SourcePPSNum;
   volatile uint8_t    SourceFixedNum;
-  volatile uint8_t    SourceAVSNum;
+  volatile uint8_t    SourceSPRAVSNum;
+  volatile uint8_t    SourceEPRAVSNum;
   volatile uint8_t    PD_Version;
   volatile uint16_t   WaitTime;
   volatile uint8_t    SetPDONum;
@@ -157,6 +169,7 @@ typedef struct {
   volatile pd_request_type_t SetRequestType; // Saved request type
   volatile uint8_t    PDO_Mismatch;          // Flag if re-matching failed
   volatile uint16_t   LastSetVoltage;
+  volatile uint16_t   LastSetCurrent;
   volatile uint8_t    USBPD_READY;
   volatile uint8_t    SourceMessageID;
   volatile uint8_t    SinkMessageID;
@@ -167,10 +180,11 @@ typedef struct {
   volatile USBPD_PPS_Status_t PPS_Status;
   volatile uint8_t    PPS_Status_Received;
   volatile uint8_t    PPS_Not_Supported;
+  volatile uint8_t    EPRModeCapable;
   volatile PD_epr_mode_t EPR_Mode;
   volatile uint8_t    EPR_NextChunk;    // Next Chunk Number to request
-  volatile uint8_t    EPR_ChunkRequest; // Flag to request chunk
-  volatile uint8_t    EPR_MessageStatus;// 0: Idle, 1: Waiting for Chunk, 2: Complete
+  volatile uint8_t    Chunked;
+  volatile uint16_t   RequestChunkMessageType;
 } pd_control_t;
 
 // ===================================================================================
@@ -186,11 +200,11 @@ uint8_t  PD_setEPRMode(uint8_t enable);         // Enter/Exit EPR Mode
 uint8_t  PD_setEPRVoltage(uint16_t voltage, uint16_t current); // Set EPR Voltage/Current
 PD_epr_mode_t PD_getEPRMode(void);                      // Get current EPR Mode status
 
-
 uint8_t  PD_getPDONum(void);                    // Get total number of PDOs
 uint8_t  PD_getFixedNum(void);                  // Get number of fixed power PDOs
 uint8_t  PD_getPPSNum(void);                    // Get number of programmable power PDOs
-uint8_t  PD_getAVSNum(void);                    // Get number of AVS PDOs
+uint8_t  PD_getSPRAVSNum(void);                 // Get number of SPR AVS PDOs
+uint8_t  PD_getEPRAVSNum(void);                 // Get number of EPR AVS PDOs
 
 PD_pdo_type_t PD_getPDOType(uint8_t pdonum);    // Get type of specified PDO
 
@@ -198,6 +212,8 @@ uint16_t PD_getPDOVoltage(uint8_t pdonum);      // Get voltage of specified fixe
 uint16_t PD_getPDOMinVoltage(uint8_t pdonum);   // Get minimum voltage of specified PDO
 uint16_t PD_getPDOMaxVoltage(uint8_t pdonum);   // Get maximum voltage of specified PDO
 uint16_t PD_getPDOMaxCurrent(uint8_t pdonum);   // Get max current of specified PDO
+uint16_t PD_getPDOMaxCurrentWithVoltage(uint8_t pdonum, uint16_t voltage); // Get max current of specified PDO with voltage
+uint16_t PD_getPDOPower(uint8_t pdonum);        // Get max power of specified PDO
 
 uint8_t  PD_getPDO(void);                       // Get active PDO
 uint16_t PD_getVoltage(void);                   // Get active voltage
