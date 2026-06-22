@@ -16,23 +16,25 @@ static pd_control_t PD_control = {
   .CC2_ConnectTimes = 0,
 };
 
-FixedSourceCap_t PD_SC_fixed[15]; // Expanded for SPR + EPR
-PPSSourceCap_t   PD_SC_PPS[7]; 
-SPRAVSSourceCap_t   PD_SC_SPR_AVS[7];
-EPRAVSSourceCap_t   PD_SC_EPR_AVS[7];
+static FixedSourceCap_t PD_SC_fixed[15]; // Expanded for SPR + EPR
+static PPSSourceCap_t   PD_SC_PPS[7];
+static SPRAVSSourceCap_t   PD_SC_SPR_AVS[7];
+static EPRAVSSourceCap_t   PD_SC_EPR_AVS[7];
 
 // Buffers
-__attribute__ ((aligned(4))) uint8_t PD_TR_buffer[264];  // PD transmit/receive buffer
-__attribute__ ((aligned(4))) uint8_t PD_CH_buffer[264];  // PD chunk buffer
-__attribute__ ((aligned(4))) uint8_t PD_SC_buffer[64];  // PD Source Cap buffer (Increased to 16 PDOs)
+static __attribute__ ((aligned(4))) uint8_t PD_TR_buffer[264];  // PD transmit/receive buffer
+static __attribute__ ((aligned(4))) uint8_t PD_CH_buffer[264];  // PD chunk buffer
+static __attribute__ ((aligned(4))) uint8_t PD_SC_buffer[64];  // PD Source Cap buffer (Increased to 16 PDOs)
 
 // ===================================================================================
 // USB PD SINK Front End Functions
 // ===================================================================================
 
-// Prototype
-uint8_t PD_checkCC(void);
-uint8_t PD_update(void);
+// Internal helpers
+static uint8_t PD_checkCC(void);
+static uint8_t PD_update(void);
+static void PD_PDO_request(void);
+static void PD_sendData(uint8_t length, uint16_t sop);
 
 // Negotiate current settings and wait until finished (return 1) or timeout (return 0)
 uint8_t PD_negotiate(void) {
@@ -69,11 +71,6 @@ uint8_t PD_getSPRAVSNum(void) {
 // Get number of EPR AVS PDOs
 uint8_t PD_getEPRAVSNum(void) {
   return PD_control.SourceEPRAVSNum;
-}
-
-// Get voltage of specified fixed power PDO
-uint16_t PD_getPDOVoltage(uint8_t pdonum) {
-  return PD_control.FixedSourceCap[pdonum - 1].Voltage;
 }
 
 // Get type of specified PDO
@@ -365,11 +362,6 @@ uint16_t PD_getCurrent(void) {
   return PD_control.SetCurrent;
 }
 
-// Check if PD is ready
-uint8_t PD_isReady(void) {
-  return PD_control.USBPD_READY;
-}
-
 // Get PDO mismatch flag
 uint8_t PD_getMismatch(void) {
   return PD_control.PDO_Mismatch;
@@ -447,11 +439,6 @@ void PD_reset(void) {
   PD_control.LastSetCurrent    = 1000;
   PD_control.SetRequestType    = REQ_FIXED;
   PD_control.PDO_Mismatch      = 0;
-  PD_control.AlertMsg.d32      = 0;
-  PD_control.AlertReceived     = 0;
-  PD_control.PPS_Status.d32    = 0;
-  PD_control.PPS_Status_Received = 0;
-  PD_control.PPS_Not_Supported = 0;
   PD_control.EPRModeCapable    = 0;
   PD_control.EPR_Mode          = PD_EPR_MODE_SPR;
   PD_control.EPR_NextChunk     = 0;
@@ -465,7 +452,7 @@ void PD_memcpy(uint8_t* dest, const uint8_t* src, uint16_t n) {
 }
 
 // Send PD data
-void PD_sendData(uint8_t length, uint16_t sop) {
+static void PD_sendData(uint8_t length, uint16_t sop) {
   if((USBPD->CONFIG & USBPD_CC_SEL) == USBPD_CC_SEL) USBPD->PORT_CC2 |= USBPD_CC_LVE;
   else                                               USBPD->PORT_CC1 |= USBPD_CC_LVE;
 
@@ -477,7 +464,7 @@ void PD_sendData(uint8_t length, uint16_t sop) {
 }
 
 // Detect CC connection; returns 0:No connection, 1:CC1 connection, 2:CC2 connection
-uint8_t PD_checkCC(void) {
+static uint8_t PD_checkCC(void) {
   uint8_t ccLine = USBPD_CCNONE;
 
   USBPD->PORT_CC1 &= ~(USBPD_CC_CE | USBPD_PA_CC_AI);
@@ -555,7 +542,7 @@ void PD_PDO_analyze(void) {
 }
 
 // Send specified PDO
-void PD_PDO_request(void) {
+static void PD_PDO_request(void) {
   uint8_t pdoNum = PD_control.SetPDONum;
   USBPD_SINKRDO_t pdo;
   USBPD_MessageHeader_t mh;
@@ -725,7 +712,7 @@ void PD_process(void) {
           mh.MessageHeader.SpecificationRevision = PD_control.PD_Version;
           edo.d32 = 0;
           edo.Struct.Action = 0x01;
-          edo.Struct.Data = 240; // EPR Sink Operational PDP (e.g. 240W)
+          edo.Struct.Data = 140; // EPR Sink Operational PDP (e.g. 140W)
           *(uint16_t*)&PD_TR_buffer[0] = mh.d16;
           PD_memcpy(&PD_TR_buffer[2], (uint8_t*)&edo.d32, 4);
           PD_sendData(6, USBPD_TX_SOP0);
@@ -778,7 +765,7 @@ void PD_process(void) {
 }
 
 // Update PD, return 1 if PDO is changed
-uint8_t PD_update(void) {
+static uint8_t PD_update(void) {
   uint8_t status = 0;
 
   if (!PD_control.USBPD_READY) {
@@ -866,7 +853,7 @@ uint8_t PD_Loop(void) {
     // EPR KeepAlive Logic (Every 375ms)
     if ((STK->CNTL - last_time) > (375 * DLY_MS_TIME)) {
       last_time = STK->CNTL;
-      if (PD_isReady()) {
+      if (PD_control.USBPD_READY) {
         PD_sendEPRKeepAlive();
       }
     }
@@ -875,7 +862,7 @@ uint8_t PD_Loop(void) {
     // Check if 5000ms has passed
     if ((STK->CNTL - last_time) > (5000 * DLY_MS_TIME)) {
       last_time = STK->CNTL;
-      if (PD_isReady()) {
+      if (PD_control.USBPD_READY) {
         PD_PDO_request();
       }
     }
@@ -961,9 +948,6 @@ void PD_RX_analyze(void) {
           }
           break;
             
-        case USBPD_EXT_MSG_PPS_STATUS:
-          break;
-            
         default:
           break;
       }
@@ -988,15 +972,7 @@ void PD_RX_analyze(void) {
           break;
 
         case USBPD_CONTROL_MSG_NOT_SUPPORTED:
-          PD_control.PPS_Not_Supported = 1;
-          if (PD_control.CC_State == CC_EPR_MODE_ENTRY) {
-            PD_control.EPR_Mode = PD_EPR_MODE_SPR;
-            PD_control.CC_State = CC_GET_SOURCE_CAP;
-          }
-          break;
-
         case USBPD_CONTROL_MSG_REJECT:
-          PD_control.PPS_Not_Supported = 1;
           if (PD_control.CC_State == CC_EPR_MODE_ENTRY) {
             PD_control.EPR_Mode = PD_EPR_MODE_SPR;
             PD_control.CC_State = CC_GET_SOURCE_CAP;
@@ -1038,17 +1014,6 @@ void PD_RX_analyze(void) {
             PD_control.EPR_Mode = PD_EPR_MODE_SPR;
             PD_control.CC_State = CC_GET_SOURCE_CAP;
           }
-          break;
-
-        case USBPD_DATA_MSG_ALERT:
-          PD_memcpy((uint8_t*)&PD_control.AlertMsg.d32, &PD_TR_buffer[2], 4);
-          PD_control.AlertReceived = 1;
-          break;
-
-        case USBPD_DATA_MSG_PPS_STATUS:
-          PD_memcpy((uint8_t*)&PD_control.PPS_Status.d32, &PD_TR_buffer[2], 4);
-          PD_control.PPS_Status_Received = 1;
-          PD_control.PPS_Not_Supported = 0;
           break;
 
         default:
@@ -1103,52 +1068,6 @@ void USBPD_IRQHandler(void) {
   }
 }
 
-// Get last Alert Data Object
-uint32_t PD_getAlert(void) {
-  return PD_control.AlertMsg.d32;
-}
-
-// Check if Alert received
-uint8_t PD_hasAlert(void) {
-  return PD_control.AlertReceived;
-}
-
-// Clear Alert flag
-void PD_clearAlert(void) {
-  PD_control.AlertReceived = 0;
-}
-
-void PD_getPPSStatus(void) {
-  PD_control.PPS_Status_Received = 0;
-  PD_control.PPS_Not_Supported = 0;
-  
-  USBPD_MessageHeader_t mh;
-  mh.d16 = 0;
-  mh.MessageHeader.MessageID = PD_control.SinkMessageID;
-  mh.MessageHeader.MessageType = USBPD_CONTROL_MSG_GET_PPS_STATUS;
-  mh.MessageHeader.SpecificationRevision = PD_control.PD_Version;
-  
-  *(uint16_t*)&PD_TR_buffer[0] = mh.d16;
-  PD_sendData(2, USBPD_TX_SOP0);
-}
-
-uint16_t PD_getPPSStatusVoltage(void) {
-  if(PD_control.PPS_Not_Supported) return 0xFFFF;
-  if(PD_control.PPS_Status.Struct.OutputVoltageIn20mVunits == 0xFFFF) return 0xFFFF;
-  return (uint16_t)PD_control.PPS_Status.Struct.OutputVoltageIn20mVunits * 20;
-}
-
-uint16_t PD_getPPSStatusCurrent(void) {
-  if(PD_control.PPS_Not_Supported) return 0xFFFF;
-  if(PD_control.PPS_Status.Struct.OutputCurrentIn50mAunits == 0xFFFF) return 0xFFFF;
-  return (uint16_t)PD_control.PPS_Status.Struct.OutputCurrentIn50mAunits * 50;
-}
-
-uint8_t PD_getPPSStatusFlag(void) {
-    if(PD_control.PPS_Not_Supported) return 0xFF;
-    if(!PD_control.PPS_Status_Received) return 0;
-    return (uint8_t)PD_control.PPS_Status.Struct.OMF;
-}
 
 // Get PD Specification Revision 1,2,3
 uint8_t PD_getRevision(void) {
