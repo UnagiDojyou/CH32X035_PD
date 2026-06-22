@@ -225,11 +225,16 @@ uint8_t PD_getPPSPowerLimited(uint8_t pdonum) {
 
 // Set specified PDO and voltage and current; returns 0:failed, 1:success
 uint8_t PD_setPDOwithCurrent(uint8_t pdonum, uint16_t voltage ,uint16_t current) {
+  PD_pdo_type_t type = PD_getPDOType(pdonum);
+  if((PD_control.EPR_Mode == PD_EPR_MODE_EPR) && (!PD_control.SourceCapIsEPR || type == PDO_TYPE_PPS)) {
+    return 0;
+  }
+
   PD_control.SetPDONum  = pdonum;
   PD_control.SetVoltage = voltage;
   PD_control.SetCurrent = current;
 
-  switch(PD_getPDOType(pdonum)) {
+  switch(type) {
     case PDO_TYPE_FIXED:
       PD_control.SetRequestType = REQ_FIXED;
       return PD_negotiate();
@@ -275,6 +280,30 @@ uint8_t PD_setPDO(uint8_t pdonum, uint16_t voltage) {
 // Set specified voltage (in millivolts) if available; returns 0:failed, 1:success
 uint8_t PD_setVoltage(uint16_t voltage) {
   uint8_t i;
+
+  if(PD_control.EPR_Mode == PD_EPR_MODE_EPR) {
+    if(!PD_control.SourceCapIsEPR) return 0;
+
+    for(i=0; i<PD_control.SourceEPRAVSNum; i++) {
+      if ((PD_control.EPRAVSSourceCap[i].MinVoltage <= voltage) && (PD_control.EPRAVSSourceCap[i].MaxVoltage >= voltage)) {
+        return PD_setPDO(PD_control.EPRAVSSourceCap[i].Index, voltage);
+      }
+    }
+
+    for(i=0; i<PD_control.SourceFixedNum; i++) {
+      if (PD_control.FixedSourceCap[i].Voltage == voltage) {
+        return PD_setPDO(PD_control.FixedSourceCap[i].Index, voltage);
+      }
+    }
+
+    for(i=0; i<PD_control.SourceSPRAVSNum; i++) {
+      if ((PD_control.SPRAVSSourceCap[i].MinVoltage <= voltage) && (PD_control.SPRAVSSourceCap[i].MaxVoltage >= voltage)) {
+        return PD_setPDO(PD_control.SPRAVSSourceCap[i].Index, voltage);
+      }
+    }
+
+    return 0;
+  }
   
   for(i=0; i<PD_control.SourceFixedNum; i++) {
     if (PD_control.FixedSourceCap[i].Voltage == voltage) {
@@ -307,6 +336,7 @@ uint8_t PD_setVoltage(uint16_t voltage) {
 // returns 0:failed, 1:success
 uint8_t PD_setPPS(uint16_t voltage,uint16_t current) {
   uint8_t i;
+  if(PD_control.EPR_Mode == PD_EPR_MODE_EPR) return 0;
   if(!PD_control.SourcePPSNum) return 0;
   for(i=0; i<PD_control.SourcePPSNum; i++) {
     if((PD_control.PPSSourceCap[i].MinVoltage <= voltage) &&
@@ -429,6 +459,7 @@ void PD_reset(void) {
   PD_control.SinkMessageID     = 0;
   PD_control.SinkGoodCRCOver   = 0;
   PD_control.SourceGoodCRCOver = 0;
+  PD_control.SourceCapIsEPR    = 0;
   PD_control.PD_Version        = USBPD_REVISION_20;
   PD_control.USBPD_READY       = 0;
   PD_control.SetPDONum         = 1;
@@ -588,6 +619,9 @@ static void PD_PDO_request(void) {
   mh.MessageHeader.MessageID             = PD_control.SinkMessageID ;
   mh.MessageHeader.SpecificationRevision = PD_control.PD_Version;
   if(PD_control.EPR_Mode == PD_EPR_MODE_EPR) {
+    if(!PD_control.SourceCapIsEPR || PD_control.SetRequestType == REQ_PPS || pdoNum == 0 || pdoNum > PD_control.SourcePDONum) {
+      return;
+    }
     mh.MessageHeader.MessageType           = USBPD_DATA_MSG_EPR_REQUEST;
     mh.MessageHeader.NumberOfDataObjects   = 2u; // RDO + PDO Copy
     *(uint16_t*)&PD_TR_buffer[0] = mh.d16;
@@ -670,6 +704,7 @@ void PD_process(void) {
         PD_control.USBPD_READY    = 0;
 
         if (PD_control.EPR_Mode > PD_EPR_MODE_SPR) {
+          PD_control.SourceCapIsEPR = 0;
           mh.d16 = 0u;
           emh.d16 = 0u;
           ecdb.d16 = 0u;
@@ -927,6 +962,7 @@ void PD_RX_analyze(void) {
         case USBPD_EXT_MSG_EPR_SRC_CAP:
           PD_control.CC_State = CC_SOURCE_CAP;
           PD_control.EPR_Mode = PD_EPR_MODE_EPR;
+          PD_control.SourceCapIsEPR = 1;
           PD_control.SourcePDONum = dataSize / 4u;
           if (PD_control.Chunked > 0) {
             PD_memcpy(PD_SC_buffer, &PD_CH_buffer[4], dataSize);
@@ -990,6 +1026,7 @@ void PD_RX_analyze(void) {
         case USBPD_DATA_MSG_SRC_CAP:
           PD_control.CC_State = CC_SOURCE_CAP;
           PD_control.EPR_Mode = PD_EPR_MODE_SPR;
+          PD_control.SourceCapIsEPR = 0;
           PD_control.SourcePDONum = mh.MessageHeader.NumberOfDataObjects;
           if(PD_control.SourcePDONum > (sizeof(PD_SC_buffer) / 4u)) {
             PD_control.SourcePDONum = sizeof(PD_SC_buffer) / 4u;

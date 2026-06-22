@@ -159,6 +159,7 @@ typedef struct {
   volatile uint8_t    SinkMessageID;
   volatile uint8_t    SinkGoodCRCOver;
   volatile uint8_t    SourceGoodCRCOver;
+  volatile uint8_t    SourceCapIsEPR;
   volatile uint8_t    EPRModeCapable;
   volatile PD_epr_mode_t EPR_Mode;
   volatile uint8_t    EPR_NextChunk;    // Next Chunk Number to request
