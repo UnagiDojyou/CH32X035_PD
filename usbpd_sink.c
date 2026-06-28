@@ -757,8 +757,11 @@ void PD_process(void) {
         // Received Enter Ack, Waiting for Enter Succeeded from Source
       }
       else if (PD_control.EPR_Mode == PD_EPR_MODE_EPR) {
-        PD_control.LastSetVoltage = 0;
-        PD_control.CC_State = CC_GET_SOURCE_CAP;
+        PD_control.SourceCapIsEPR = 0;
+        PD_control.LastSetPDONum  = PD_control.SetPDONum;
+        PD_control.LastSetVoltage = PD_control.SetVoltage;
+        PD_control.LastSetCurrent = PD_control.SetCurrent;
+        PD_control.CC_State = CC_WAIT_SRC_CAP;
         PD_control.WaitTime = 0;
       }
       else if (PD_control.EPR_Mode == PD_EPR_MODE_SPR) {
@@ -1042,8 +1045,11 @@ void PD_RX_analyze(void) {
             PD_control.EPR_Mode = PD_EPR_MODE_ENTER_ACK;
           } else if (eprdo.Struct.Action == 0x03) { // Enter Succeeded
             PD_control.EPR_Mode = PD_EPR_MODE_EPR;
-            PD_control.LastSetVoltage = 0;
-            PD_control.CC_State = CC_GET_SOURCE_CAP;
+            PD_control.SourceCapIsEPR = 0;
+            PD_control.LastSetPDONum  = PD_control.SetPDONum;
+            PD_control.LastSetVoltage = PD_control.SetVoltage;
+            PD_control.LastSetCurrent = PD_control.SetCurrent;
+            PD_control.CC_State = CC_WAIT_SRC_CAP;
           } else if (eprdo.Struct.Action == 0x04) { // Enter Failed
             PD_control.EPR_Mode = PD_EPR_MODE_SPR;
             PD_control.CC_State = CC_GET_SOURCE_CAP;
