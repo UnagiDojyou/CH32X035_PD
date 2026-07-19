@@ -111,6 +111,8 @@ typedef enum {
   CC_GET_SOURCE_CAP,
   CC_WAIT_SRC_CAP,
   CC_EPR_MODE_ENTRY,
+  CC_EPR_MODE_EXIT,
+  CC_EPR_EXIT_WAIT_SRC_CAP,
   CC_SEND_CHUNK_REQUEST,
 } cc_state_t;
 
@@ -126,7 +128,8 @@ typedef enum {
   PD_EPR_MODE_SPR = 0,
   PD_EPR_MODE_ENTERING,
   PD_EPR_MODE_ENTER_ACK,
-  PD_EPR_MODE_EPR
+  PD_EPR_MODE_EPR,
+  PD_EPR_MODE_EXITING
 } PD_epr_mode_t;
 
 typedef struct {
@@ -177,7 +180,7 @@ uint8_t  PD_setVoltage(uint16_t voltage);       // Set specified voltage (in mil
 
 uint8_t  PD_setPPS(uint16_t voltage,uint16_t current); // Set specified voltage and current (in millivolts and milliampere)
 
-uint8_t  PD_setEPRMode(uint8_t enable);         // Enter EPR Mode, exit is not supported yet
+uint8_t  PD_setEPRMode(uint8_t enable);         // Enter or exit EPR Mode
 uint8_t  PD_getEPRCapable(void);                // Check if Source advertises EPR Mode capable
 PD_epr_mode_t PD_getEPRMode(void);              // Get current EPR Mode status
 

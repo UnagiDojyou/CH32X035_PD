@@ -35,6 +35,7 @@ static uint8_t PD_checkCC(void);
 static uint8_t PD_update(void);
 static void PD_PDO_request(void);
 static void PD_sendData(uint8_t length, uint16_t sop);
+static uint8_t PD_requestSPRContractForEPRExit(void);
 
 // Negotiate current settings and wait until finished (return 1) or timeout (return 0)
 uint8_t PD_negotiate(void) {
@@ -361,10 +362,12 @@ uint8_t PD_getEPRCapable(void) {
 
 // Set EPR Mode
 uint8_t PD_setEPRMode(uint8_t enable) {
-  if (!PD_control.USBPD_READY || !PD_control.EPRModeCapable) {
+  if (!PD_control.USBPD_READY) {
     return 0;
   }
+
   if (enable) {
+    if (!PD_control.EPRModeCapable) return 0;
     if (PD_control.EPR_Mode == PD_EPR_MODE_SPR) {
       PD_control.CC_LastState = PD_control.CC_State;
       PD_control.CC_State = CC_EPR_MODE_ENTRY;
@@ -373,7 +376,48 @@ uint8_t PD_setEPRMode(uint8_t enable) {
       return PD_negotiate();
     }
     else if (PD_control.EPR_Mode == PD_EPR_MODE_EPR) return 1;
+  } else {
+    if (PD_control.EPR_Mode == PD_EPR_MODE_SPR) return 1;
+    if (PD_control.EPR_Mode != PD_EPR_MODE_EPR) return 0;
+
+    if(!PD_requestSPRContractForEPRExit()) {
+      return 0;
+    }
+
+    PD_control.CC_LastState = PD_control.CC_State;
+    PD_control.CC_State = CC_EPR_MODE_EXIT;
+    PD_control.EPR_Mode = PD_EPR_MODE_EXITING;
+    PD_control.USBPD_READY = 0;
+    PD_control.SourceGoodCRCOver = 0;
+    PD_control.SinkGoodCRCOver = 0;
+    return PD_negotiate();
   }
+  return 0;
+}
+
+static uint8_t PD_requestSPRContractForEPRExit(void) {
+  uint8_t i;
+  PD_pdo_type_t currentType = PD_getPDOType(PD_control.SetPDONum);
+
+  if((PD_control.SetPDONum <= 7u) && (PD_control.SetVoltage <= 20000u) &&
+     (currentType == PDO_TYPE_FIXED || currentType == PDO_TYPE_SPR_AVS)) {
+    return 1;
+  }
+
+  for(i=0; i<PD_control.SourceFixedNum; i++) {
+    if((PD_control.FixedSourceCap[i].Index <= 7u) && (PD_control.FixedSourceCap[i].Voltage <= 20000u)) {
+      return PD_setPDO(PD_control.FixedSourceCap[i].Index, PD_control.FixedSourceCap[i].Voltage);
+    }
+  }
+
+  for(i=0; i<PD_control.SourceSPRAVSNum; i++) {
+    if((PD_control.SPRAVSSourceCap[i].Index <= 7u) && (PD_control.SPRAVSSourceCap[i].MinVoltage <= 20000u)) {
+      uint16_t voltage = PD_control.SPRAVSSourceCap[i].MinVoltage;
+      if(voltage < 5000u) voltage = 5000u;
+      return PD_setPDO(PD_control.SPRAVSSourceCap[i].Index, voltage);
+    }
+  }
+
   return 0;
 }
 
@@ -770,6 +814,42 @@ void PD_process(void) {
       }
       break;
 
+    case CC_EPR_MODE_EXIT:
+      if(PD_control.CC_LastState != PD_control.CC_State) {
+        USBPD_EPRMode_DO_t edo;
+        mh.d16 = 0;
+        mh.MessageHeader.MessageID             = PD_control.SinkMessageID;
+        mh.MessageHeader.MessageType           = USBPD_DATA_MSG_EPR_MODE;
+        mh.MessageHeader.NumberOfDataObjects   = 1u;
+        mh.MessageHeader.SpecificationRevision = PD_control.PD_Version;
+        edo.d32 = 0;
+        edo.Struct.Action = 0x05;
+        edo.Struct.Data = 0;
+        *(uint16_t*)&PD_TR_buffer[0] = mh.d16;
+        PD_memcpy(&PD_TR_buffer[2], (uint8_t*)&edo.d32, 4);
+        PD_sendData(6, USBPD_TX_SOP0);
+      }
+      if(PD_control.SourceGoodCRCOver) {
+        PD_control.SourceGoodCRCOver = 0;
+        PD_control.EPR_Mode = PD_EPR_MODE_SPR;
+        PD_control.SourceCapIsEPR = 0;
+        PD_control.SourceEPRAVSNum = 0;
+        PD_control.LastSetPDONum  = PD_control.SetPDONum;
+        PD_control.LastSetVoltage = PD_control.SetVoltage;
+        PD_control.LastSetCurrent = PD_control.SetCurrent;
+        PD_control.CC_State = CC_EPR_EXIT_WAIT_SRC_CAP;
+        PD_control.WaitTime = 0;
+      }
+      break;
+
+    case CC_EPR_EXIT_WAIT_SRC_CAP:
+      if(PD_control.WaitTime > 60u) {
+        PD_control.LastSetVoltage = 0;
+        PD_control.CC_State = CC_GET_SOURCE_CAP;
+        PD_control.WaitTime = 0;
+      }
+      break;
+
     case CC_SEND_CHUNK_REQUEST:
       if (PD_control.EPR_NextChunk > 0) {
         
@@ -1055,7 +1135,13 @@ void PD_RX_analyze(void) {
             PD_control.CC_State = CC_GET_SOURCE_CAP;
           } else if (eprdo.Struct.Action == 0x05) { // Exit
             PD_control.EPR_Mode = PD_EPR_MODE_SPR;
-            PD_control.CC_State = CC_GET_SOURCE_CAP;
+            PD_control.SourceCapIsEPR = 0;
+            PD_control.SourceEPRAVSNum = 0;
+            PD_control.LastSetPDONum  = PD_control.SetPDONum;
+            PD_control.LastSetVoltage = PD_control.SetVoltage;
+            PD_control.LastSetCurrent = PD_control.SetCurrent;
+            PD_control.CC_State = CC_EPR_EXIT_WAIT_SRC_CAP;
+            PD_control.WaitTime = 0;
           }
           break;
 

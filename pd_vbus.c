@@ -6,7 +6,7 @@
 #include "usbpd_sink.h"                   // USB PD sink functions
 #include <usb_cdc.h>
 
-#define TARGET_VOLTAGE    7500            // define target voltage in millivolts
+#define TARGET_VOLTAGE    6000            // define target voltage in millivolts
 #define TARGET_CURRENT    2000            // define target current in milliampere
 #define PIN_ONOFF PA5
 
@@ -103,6 +103,16 @@ int main(void) {
     if (PD_setEPRMode(1)) {
       CDC_println("EPR Mode Set");
       print_PDO_list();
+      for (uint16_t i = 0; i < 1000; i++) {
+        PD_Loop();
+        DLY_ms(1);
+      }
+      if (PD_setEPRMode(0)) {
+        CDC_println("EPR Mode exit");
+      }else {
+        CDC_println("Fail to exit EPR Mode!");
+        while(1);
+      }
     } else {
       CDC_println("Fail to set EPR Mode!");
       while(1);
@@ -114,9 +124,11 @@ int main(void) {
 
   DLY_ms(5);
   if (PD_setVoltage(TARGET_VOLTAGE)) {
-    CDC_println("TARGET_VOLTAGE V Set");
+    CDC_printD(TARGET_VOLTAGE);
+    CDC_println(" V Set");
   } else {
-    CDC_println("Fail to set TARGET_VOLTAGE V");
+    CDC_printD(TARGET_VOLTAGE);
+    CDC_println(" V Set Failed");
     while(1);
   }
 
@@ -124,7 +136,8 @@ int main(void) {
     if (PD_Loop()) {
       PD_setMismatch(0);
       if (PD_setVoltage(TARGET_VOLTAGE)) {
-        CDC_println("TARGET_VOLTAGE V Set");
+        CDC_printD(TARGET_VOLTAGE);
+        CDC_println(" V Set");
       } else {
         DLY_ms(5);
         PD_setMismatch(1);
