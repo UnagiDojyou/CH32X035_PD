@@ -125,10 +125,10 @@ int main(void) {
   DLY_ms(5);
   if (PD_setVoltage(TARGET_VOLTAGE)) {
     CDC_printD(TARGET_VOLTAGE);
-    CDC_println(" V Set");
+    CDC_println(" mV Set");
   } else {
     CDC_printD(TARGET_VOLTAGE);
-    CDC_println(" V Set Failed");
+    CDC_println(" mV Set Failed");
     while(1);
   }
 
@@ -137,7 +137,7 @@ int main(void) {
       PD_setMismatch(0);
       if (PD_setVoltage(TARGET_VOLTAGE)) {
         CDC_printD(TARGET_VOLTAGE);
-        CDC_println(" V Set");
+        CDC_println(" mV Set");
       } else {
         DLY_ms(5);
         PD_setMismatch(1);

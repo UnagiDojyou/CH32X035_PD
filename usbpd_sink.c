@@ -180,7 +180,7 @@ uint16_t PD_getPDOMaxCurrentWithVoltage(uint8_t pdonum, uint16_t voltage) {
   for(i=0; i<PD_control.SourceFixedNum; i++) {
     if(PD_control.FixedSourceCap[i].Index == pdonum) return PD_control.FixedSourceCap[i].Current;
   }
-  return 0; 
+  return 0;
 }
 
 // Get max power of specified PDO

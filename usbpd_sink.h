@@ -25,8 +25,8 @@
 // PD_getPDOType(p)                   Get type of specified PDO
 // PD_getPDOMinVoltage(p)             Get minimum voltage of specified PDO
 // PD_getPDOMaxVoltage(p)             Get maximum voltage of specified PDO
-// PD_getPDOMaxCurrent(p)             Get max current of specified PDO
-// PD_getPDOMaxCurrentWithVoltage(p, mV) Get max current of specified PDO at voltage
+// PD_getPDOMaxCurrent(p)             Get max current of specified PDO, not recommend for EPR AVS and PPS
+// PD_getPDOMaxCurrentWithVoltage(p, mV) Get max current of specified PDO at voltage, for RPR AVS and PPSPowerLimited
 // PD_getPDOPower(p)                  Get max power of specified PDO
 // PD_getPPSPowerLimited(p)           Get PPS Power Limited flag
 //
