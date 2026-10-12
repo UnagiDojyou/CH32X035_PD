@@ -188,6 +188,9 @@ typedef struct {
 // ===================================================================================
 // Functions
 // ===================================================================================
+// Optional callback from PD_negotiate, in main context. Override to service USB.
+// Do not call PD negotiation functions from this callback.
+void     PD_wait_callback(void);
 uint8_t  PD_connect(void);                      // Initialize PD and connect
 uint8_t  PD_negotiate(void);                    // Negotiate current settings
 uint8_t  PD_Loop(void);                         // Main Loop function, handles Update and PPS Keep-Alive

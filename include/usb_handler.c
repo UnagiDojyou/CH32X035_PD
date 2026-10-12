@@ -2,6 +2,7 @@
 // USB Handler for CH32X035/X034/X033                                         * v1.0 *
 // ===================================================================================
 // 2023 by Stefan Wagner:   https://github.com/wagiminator
+// 2026 by Unagi Dojyou:    https://unagidojyou.com
 
 #include "usb_handler.h"
 
@@ -25,6 +26,9 @@ void USB_EP_init(void) {
   USB_INIT_endpoints();                     // custom EP init handler
   #endif
 
+  USB_SetupReq = 0xff;
+  USB_SetupTyp = 0;
+  USB_SetupLen = 0;
   USB_ENUM_OK = 0;
   USB_Config  = 0;
   USB_Addr    = 0;
@@ -69,6 +73,17 @@ void USB_EP0_copyDescr(uint8_t len) {
 // ===================================================================================
 // Endpoint EP0 Handlers
 // ===================================================================================
+
+// The endpoint addresses exposed by the two CDC descriptors.
+static volatile uint16_t* USB_EP_control(uint8_t address) {
+  switch(address) {
+    case 0x81: return &USBFSD->UEP1_CTRL_H;
+    case 0x02: case 0x82: return &USBFSD->UEP2_CTRL_H;
+    case 0x03: case 0x83: return &USBFSD->UEP3_CTRL_H;
+    case 0x85: return &USBFSD->UEP5_CTRL_H;
+    default: return 0;
+  }
+}
 
 // Endpoint 0 SETUP handler
 void USB_EP0_SETUP(void) {
@@ -157,22 +172,50 @@ void USB_EP0_SETUP(void) {
         break;
 
       case USB_SET_CONFIGURATION:
-        USB_Config  = USB_SetupBuf->wValueL;
-        USB_ENUM_OK = 1;
+        if(USB_SetupTyp != 0 || USB_SetupLen || USB_SetupBuf->wValueH ||
+           USB_SetupBuf->wValueL > 1 || USB_SetupBuf->wIndexL || USB_SetupBuf->wIndexH) len = 0xff;
+        else {
+          USB_INIT_endpoints();            // reset both ports when configuring/unconfiguring
+          USB_Config = USB_SetupBuf->wValueL;
+          USB_ENUM_OK = (USB_Config != 0);
+        }
         break;
 
       case USB_GET_INTERFACE:
+        if(USB_SetupTyp != 0x81 || !USB_Config || USB_SetupBuf->wIndexH ||
+           USB_SetupBuf->wIndexL >= 4 || USB_SetupLen != 1 ||
+           USB_SetupBuf->wValueL || USB_SetupBuf->wValueH) len = 0xff;
+        else { EP0_buffer[0] = 0; len = 1; }
         break;
 
       case USB_SET_INTERFACE:
+        if(USB_SetupTyp != 0x01 || !USB_Config || USB_SetupBuf->wIndexH ||
+           USB_SetupBuf->wIndexL >= 4 || USB_SetupBuf->wValueL ||
+           USB_SetupBuf->wValueH || USB_SetupLen) len = 0xff;
+        else CDC_EP_resetInterface(USB_SetupBuf->wIndexL);
         break;
 
-      case USB_GET_STATUS:
-        EP0_buffer[0] = 0x00;
-        EP0_buffer[1] = 0x00;
-        if(USB_SetupLen > 2) USB_SetupLen = 2;
-        len = USB_SetupLen;
+      case USB_GET_STATUS: {
+        uint8_t status = 0;
+        if(USB_SetupTyp == 0x82) {
+          volatile uint16_t* control = USB_EP_control(USB_SetupBuf->wIndexL);
+          if(USB_SetupBuf->wIndexL == 0 || USB_SetupBuf->wIndexL == 0x80) control = &USBFSD->UEP0_CTRL_H;
+          if(!control) { len = 0xff; break; }
+          status = (USB_SetupBuf->wIndexL & 0x80)
+                 ? ((*control & USBFS_UEP_T_RES_MASK) == USBFS_UEP_T_RES_STALL)
+                 : ((*control & USBFS_UEP_R_RES_MASK) == USBFS_UEP_R_RES_STALL);
+        } else if(USB_SetupTyp == 0x81) {
+          if(!USB_Config || USB_SetupBuf->wIndexL >= 4) { len = 0xff; break; }
+        } else if(USB_SetupTyp != 0x80 || USB_SetupBuf->wIndexL) { len = 0xff; break; }
+        if(USB_SetupBuf->wIndexH || USB_SetupBuf->wValueL || USB_SetupBuf->wValueH || USB_SetupLen != 2) {
+          len = 0xff;
+          break;
+        }
+        EP0_buffer[0] = status;
+        EP0_buffer[1] = 0;
+        len = 2;
         break;
+      }
 
       case USB_CLEAR_FEATURE:
         if((USB_SetupTyp & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_DEVICE ) {
@@ -185,6 +228,8 @@ void USB_EP0_SETUP(void) {
           else len = 0xff;
         }
         else if((USB_SetupTyp & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_ENDP) {
+          if(USB_SetupTyp != 0x02 || !USB_Config || USB_SetupLen || USB_SetupBuf->wIndexH ||
+             USB_SetupBuf->wValueL || USB_SetupBuf->wValueH) { len = 0xff; break; }
           switch(USB_SetupBuf->wIndexL) {
             #ifdef EP1_OUT_callback
             case 0x01:
@@ -274,6 +319,7 @@ void USB_EP0_SETUP(void) {
               len = 0xff;
               break;
           }
+          if(len != 0xff) CDC_EP_clearHalt(USB_SetupBuf->wIndexL);
         }
         else len = 0xff;
         break;
@@ -286,6 +332,8 @@ void USB_EP0_SETUP(void) {
           else len = 0xff;
         }
         else if((USB_SetupTyp & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_ENDP) {
+          if(USB_SetupTyp != 0x02 || !USB_Config || USB_SetupLen || USB_SetupBuf->wIndexH ||
+             USB_SetupBuf->wValueH) { len = 0xff; break; }
           if(USB_SetupBuf->wValueL == 0x00) {
             switch(USB_SetupBuf->wIndexL) {
               #ifdef EP1_OUT_callback

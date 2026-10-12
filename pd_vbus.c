@@ -18,19 +18,40 @@ static void CDC_reset_bootloader(void) {
 // Match a complete line across CDC packets. Reject extra or mismatched characters.
 static void CDC_poll_commands(void) {
   static const char command[] = "bootloader";
-  static uint8_t position = 0;
-  static uint8_t invalid = 0;
-  while (CDC_available()) {
-    char c = CDC_read();
-    if (c == '\r' || c == '\n') {
-      uint8_t boot = !invalid && position == sizeof(command) - 1;
-      position = 0;
-      invalid = 0;
-      if (boot) CDC_reset_bootloader();
-    } else if (!invalid) {
-      if (position < sizeof(command) - 1 && c == command[position]) position++;
-      else invalid = 1;
+  static uint8_t position[2] = {0, 0};
+  static uint8_t invalid[2] = {0, 0};
+  for(uint8_t port = 0; port < 2; port++) {
+    // Bound each visit so a continuous stream cannot starve PD or the other CDC.
+    for(uint8_t count = 0; count < 64; count++) {
+      char c;
+      if(port) {
+        // CDC2 is a lossless echo port. Leave OUT pending while its TX queue is full.
+        if(!CDC2_ready() || !CDC2_tryRead(&c)) break;
+        CDC2_tryWrite(c);
+      } else if(!CDC_tryRead(&c)) break;
+      if(c == '\r' || c == '\n') {
+        uint8_t boot = !invalid[port] && position[port] == sizeof(command) - 1;
+        position[port] = 0;
+        invalid[port] = 0;
+        if(boot) CDC_reset_bootloader();
+      } else if(!invalid[port]) {
+        if(position[port] < sizeof(command) - 1 && c == command[position[port]]) position[port]++;
+        else invalid[port] = 1;
+      }
     }
+  }
+  CDC2_flush();
+}
+
+// Keep both CDC ports responsive while the PD library waits for a contract.
+void PD_wait_callback(void) {
+  CDC_poll_commands();
+}
+
+static void CDC_delay(uint16_t milliseconds) {
+  while(milliseconds--) {
+    CDC_poll_commands();
+    DLY_ms(1);
   }
 }
 
@@ -119,7 +140,7 @@ int main(void) {
       CDC_print(".");
       count = 0;
     }
-    DLY_ms(100);
+    CDC_delay(100);
   }
   CDC_print("PD Version");
   CDC_printD(PD_getRevision());
@@ -127,7 +148,7 @@ int main(void) {
 
   if (PD_setPDO(1, 5000)) {
     CDC_println("PDO Set 5V");
-    DLY_ms(1000);
+    CDC_delay(1000);
   } else {
     CDC_println("Fail to set 5V");
     CDC_wait_commands();

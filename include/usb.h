@@ -162,6 +162,7 @@ extern "C" {
 #define USB_ENDP_ADDR_EP3_IN    0x83
 #define USB_ENDP_ADDR_EP4_OUT   0x04
 #define USB_ENDP_ADDR_EP4_IN    0x84
+#define USB_ENDP_ADDR_EP5_IN    0x85
 #endif
 
 #ifndef MAX_PACKET_SIZE

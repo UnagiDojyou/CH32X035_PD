@@ -2,6 +2,7 @@
 // USB Handler for CH32X035/X034/X033                                         * v1.0 *
 // ===================================================================================
 // 2023 by Stefan Wagner:   https://github.com/wagiminator
+// 2026 by Unagi Dojyou:    https://unagidojyou.com
 
 #pragma once
 
@@ -28,9 +29,15 @@ extern "C" {
 // ===================================================================================
 uint8_t CDC_control(void);
 void CDC_EP_init(void);
+void CDC_EP_resetInterface(uint8_t interface);
 void CDC_EP0_OUT(void);
+void CDC_EP1_IN(void);
 void CDC_EP2_IN(void);
 void CDC_EP2_OUT(void);
+void CDC_EP3_IN(void);
+void CDC_EP3_OUT(void);
+void CDC_EP5_IN(void);
+void CDC_EP_clearHalt(uint8_t address);
 
 // ===================================================================================
 // USB Handler Defines
@@ -44,6 +51,10 @@ void CDC_EP2_OUT(void);
 #define EP0_SETUP_callback        USB_EP0_SETUP
 #define EP0_IN_callback           USB_EP0_IN
 #define EP0_OUT_callback          USB_EP0_OUT
+#define EP1_IN_callback           CDC_EP1_IN
+#define EP3_IN_callback           CDC_EP3_IN
+#define EP3_OUT_callback          CDC_EP3_OUT
+#define EP5_IN_callback           CDC_EP5_IN
 #define EP2_IN_callback           CDC_EP2_IN
 #define EP2_OUT_callback          CDC_EP2_OUT
 

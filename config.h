@@ -15,7 +15,7 @@
 // USB device descriptor
 #define USB_VENDOR_ID       0x16C0    // VID (shared www.voti.nl)
 #define USB_PRODUCT_ID      0x27DD    // PID (shared CDC-ACM)
-#define USB_DEVICE_VERSION  0x0100    // v1.0 (BCD-format)
+#define USB_DEVICE_VERSION  0x0200    // v2.0 (BCD-format)
 #define USB_LANGUAGE        0x0409    // US English
 
 // USB configuration descriptor
@@ -23,6 +23,7 @@
 
 // USB descriptor strings
 #define MANUF_STR           "wagiminator"
-#define PROD_STR            "USB-to-Serial Converter"
+#define PROD_STR            "Dual USB-to-Serial Converter"
 #define SERIAL_STR          "CH32X035CDC"
 #define INTERF_STR          "CDC-Serial"
+#define INTERF2_STR         "CDC-Serial 2"

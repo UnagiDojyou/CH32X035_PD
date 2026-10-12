@@ -2,6 +2,7 @@
 // USB Descriptors
 // ===================================================================================
 // 2023 by Stefan Wagner:   https://github.com/wagiminator
+// 2026 by Unagi Dojyou:    https://unagidojyou.com
 
 #include "usb_descr.h"
 
@@ -13,6 +14,8 @@
 uint8_t __attribute__((aligned(4))) EP0_buffer[EP0_BUF_SIZE];
 uint8_t __attribute__((aligned(4))) EP1_buffer[EP1_BUF_SIZE];
 uint8_t __attribute__((aligned(4))) EP2_buffer[EP2_BUF_SIZE];
+uint8_t __attribute__((aligned(4))) EP3_buffer[EP3_BUF_SIZE];
+uint8_t __attribute__((aligned(4))) EP5_buffer[EP5_BUF_SIZE];
 
 // ===================================================================================
 // Device Descriptor
@@ -21,9 +24,9 @@ __code USB_DEV_DESCR DevDescr = {
   .bLength            = sizeof(DevDescr),       // size of the descriptor in bytes: 18
   .bDescriptorType    = USB_DESCR_TYP_DEVICE,   // device descriptor: 0x01
   .bcdUSB             = 0x0200,                 // USB specification: USB 2.0
-  .bDeviceClass       = 0,                      // interface will define class
-  .bDeviceSubClass    = 0,                      // unused
-  .bDeviceProtocol    = 0,                      // unused
+  .bDeviceClass       = 0xEF,                   // composite device with IADs
+  .bDeviceSubClass    = 2,                      // common class
+  .bDeviceProtocol    = 1,                      // interface association descriptor
   .bMaxPacketSize0    = EP0_SIZE,               // maximum packet size for Endpoint 0
   .idVendor           = USB_VENDOR_ID,          // VID
   .idProduct          = USB_PRODUCT_ID,         // PID
@@ -44,7 +47,7 @@ __code USB_CFG_DESCR_CDC CfgDescr = {
     .bLength            = sizeof(USB_CFG_DESCR),  // size of the descriptor in bytes
     .bDescriptorType    = USB_DESCR_TYP_CONFIG,   // configuration descriptor: 0x02
     .wTotalLength       = sizeof(CfgDescr),       // total length in bytes
-    .bNumInterfaces     = 2,                      // number of interfaces: 2
+    .bNumInterfaces     = 4,                      // two CDC functions, two interfaces each
     .bConfigurationValue= 1,                      // value to select this configuration
     .iConfiguration     = 0,                      // no configuration string descriptor
     .bmAttributes       = 0x80,                   // attributes = bus powered, no wakeup
@@ -79,7 +82,7 @@ __code USB_CFG_DESCR_CDC CfgDescr = {
   // Functional Descriptors for Interface 0
   .functional = {
     0x05,0x24,0x00,0x10,0x01,                     // header functional descriptor
-    0x05,0x24,0x01,0x00,0x00,                     // call management functional descriptor
+    0x05,0x24,0x01,0x00,0x01,                     // call management functional descriptor
     0x04,0x24,0x02,0x02,                          // direct line management functional descriptor
     0x05,0x24,0x06,0x00,0x01                      // union functional descriptor: CDC IF0, Data IF1
   },
@@ -125,6 +128,82 @@ __code USB_CFG_DESCR_CDC CfgDescr = {
     .bmAttributes       = USB_ENDP_TYPE_BULK,     // transfer type: bulk (0x02)
     .wMaxPacketSize     = EP2_SIZE,               // max packet size
     .bInterval          = 0                       // polling intervall (ignored for bulk)
+  },
+
+  // Interface Association Descriptor
+  .association2 = {
+    .bLength            = sizeof(USB_IAD_DESCR),  // size of the descriptor in bytes
+    .bDescriptorType    = USB_DESCR_TYP_IAD,      // interf association descr: 0x0B
+    .bFirstInterface    = 2,                      // first interface
+    .bInterfaceCount    = 2,                      // total number of interfaces
+    .bFunctionClass     = USB_DEV_CLASS_COMM,     // function class: CDC (0x02)
+    .bFunctionSubClass  = 2,                      // 2: Abstract Control Model (ACM)
+    .bFunctionProtocol  = 1,                      // 1: AT command protocol
+    .iFunction          = 5                       // index of String Descriptor
+  },
+
+  // Interface Descriptor: Interface 2 (CDC)
+  .interface2 = {
+    .bLength            = sizeof(USB_ITF_DESCR),  // size of the descriptor in bytes: 9
+    .bDescriptorType    = USB_DESCR_TYP_INTERF,   // interface descriptor: 0x04
+    .bInterfaceNumber   = 2,                      // number of this interface: 2
+    .bAlternateSetting  = 0,                      // value used to select alternative setting
+    .bNumEndpoints      = 1,                      // number of endpoints used: 1
+    .bInterfaceClass    = USB_DEV_CLASS_COMM,     // interface class: CDC (0x02)
+    .bInterfaceSubClass = 2,                      // 2: Abstract Control Model (ACM)
+    .bInterfaceProtocol = 1,                      // 1: AT command protocol
+    .iInterface         = 5                       // index of String Descriptor
+  },
+
+  // Functional Descriptors for Interface 2
+  .functional2 = {
+    0x05,0x24,0x00,0x10,0x01,                     // header functional descriptor
+    0x05,0x24,0x01,0x00,0x03,                     // call management functional descriptor
+    0x04,0x24,0x02,0x02,                          // direct line management functional descriptor
+    0x05,0x24,0x06,0x02,0x03                      // union functional descriptor: CDC IF2, Data IF3
+  },
+
+  // Endpoint Descriptor: Endpoint 5 (CDC Upload, Interrupt)
+  .ep5IN = {
+    .bLength            = sizeof(USB_ENDP_DESCR), // size of the descriptor in bytes: 7
+    .bDescriptorType    = USB_DESCR_TYP_ENDP,     // endpoint descriptor: 0x05
+    .bEndpointAddress   = USB_ENDP_ADDR_EP5_IN,   // endpoint: 5, direction: IN (0x85)
+    .bmAttributes       = USB_ENDP_TYPE_INTER,    // transfer type: interrupt (0x03)
+    .wMaxPacketSize     = EP5_SIZE,               // max packet size
+    .bInterval          = 1                       // polling intervall in ms
+  },
+
+  // Interface Descriptor: Interface 3 (Data)
+  .interface3 = {
+    .bLength            = sizeof(USB_ITF_DESCR),  // size of the descriptor in bytes: 9
+    .bDescriptorType    = USB_DESCR_TYP_INTERF,   // interface descriptor: 0x04
+    .bInterfaceNumber   = 3,                      // number of this interface: 3
+    .bAlternateSetting  = 0,                      // value used to select alternative setting
+    .bNumEndpoints      = 2,                      // number of endpoints used: 2
+    .bInterfaceClass    = USB_DEV_CLASS_DATA,     // interface class: data (0x0a)
+    .bInterfaceSubClass = 0,                      // interface sub class
+    .bInterfaceProtocol = 0,                      // interface protocol
+    .iInterface         = 5                       // index of String Descriptor
+  },
+
+  // Endpoint Descriptor: Endpoint 3 (OUT)
+  .ep3OUT = {
+    .bLength            = sizeof(USB_ENDP_DESCR), // size of the descriptor in bytes: 7
+    .bDescriptorType    = USB_DESCR_TYP_ENDP,     // endpoint descriptor: 0x05
+    .bEndpointAddress   = USB_ENDP_ADDR_EP3_OUT,  // endpoint: 3, direction: OUT (0x03)
+    .bmAttributes       = USB_ENDP_TYPE_BULK,     // transfer type: bulk (0x02)
+    .wMaxPacketSize     = EP3_SIZE,               // max packet size
+    .bInterval          = 0                       // polling intervall (ignored for bulk)
+  },
+
+  // Endpoint Descriptor: Endpoint 3 (IN)
+  .ep3IN = {
+    .bLength            = sizeof(USB_ENDP_DESCR), // size of the descriptor in bytes: 7
+    .bDescriptorType    = USB_DESCR_TYP_ENDP,     // endpoint descriptor: 0x05
+    .bEndpointAddress   = USB_ENDP_ADDR_EP3_IN,   // endpoint: 3, direction: IN (0x83)
+    .bmAttributes       = USB_ENDP_TYPE_BULK,     // transfer type: bulk (0x02)
+    .wMaxPacketSize     = EP3_SIZE,               // max packet size
+    .bInterval          = 0                       // polling intervall (ignored for bulk)
   }
 };
 
@@ -150,3 +229,6 @@ __code USB_STR_DESCR SerDescr = USB_CHAR_TO_STR_DESCR(SERIAL_STR);
 
 // Interface String Descriptor (Index 4)
 __code USB_STR_DESCR InterfDescr = USB_CHAR_TO_STR_DESCR(INTERF_STR);
+
+// Second CDC interface string (Index 5)
+__code USB_STR_DESCR Interf2Descr = USB_CHAR_TO_STR_DESCR(INTERF2_STR);

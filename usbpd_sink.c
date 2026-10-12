@@ -37,6 +37,12 @@ static void PD_PDO_request(void);
 static void PD_sendData(uint8_t length, uint16_t sop);
 static uint8_t PD_requestSPRContractForEPRExit(void);
 
+// Optional main-code callback while waiting for a PD negotiation. Applications
+// may service USB or other work here; do not start another PD operation from it.
+void PD_wait_callback(void) __attribute__((weak));
+void PD_wait_callback(void) {
+}
+
 // Negotiate current settings and wait until finished (return 1) or timeout (return 0)
 uint8_t PD_negotiate(void) {
   uint8_t counter = 255;
@@ -45,6 +51,7 @@ uint8_t PD_negotiate(void) {
   while((!PD_control.USBPD_READY) && (--counter)) {
     DLY_ms(5);
     PD_update();
+    PD_wait_callback();
   }
   return(counter > 0);
 }
