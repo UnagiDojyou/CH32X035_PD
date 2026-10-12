@@ -1750,10 +1750,10 @@ typedef struct
 #define FLASH_STATR_EOP                         ((uint8_t)0x20) /* End of operation */
 #define FLASH_STATR_FWAKE_FLAG                  ((uint8_t)0x40) /* Flag of wake */
 #define FLASH_STATR_TURBO                       ((uint8_t)0x80) /* The state of TURBO Enable */
-#define FLASH_STATR_BOOT_AVA                    ((uint16_t)0x100) /* The state of Init Config */
-#define FLASH_STATR_BOOT_STATUS                 ((uint16_t)0x200) /* The source of Execute Program */
-#define FLASH_STATR_BOOT_MODE                   ((uint16_t)0x400) /* The switch of user section or boot section*/
-#define FLASH_STATR_BOOT_LOCK                   ((uint16_t)0x800) /* Lock boot area*/
+#define FLASH_STATR_BOOT_AVA                    ((uint16_t)0x1000) /* The state of Init Config */
+#define FLASH_STATR_BOOT_STATUS                 ((uint16_t)0x2000) /* The source of Execute Program */
+#define FLASH_STATR_BOOT_MODE                   ((uint16_t)0x4000) /* The switch of user section or boot section*/
+#define FLASH_STATR_BOOT_LOCK                   ((uint16_t)0x8000) /* Lock boot area*/
 
 /*******************  Bit definition for FLASH_CTLR register  *******************/
 #define FLASH_CTLR_PG                           ((uint32_t)0x00000001) /* Programming */

@@ -38,7 +38,7 @@
 //
 // Reference:               https://github.com/openwch/ch32x035
 // 2023 by Stefan Wagner:   https://github.com/wagiminator
-// 2025 by Unagi Dojyou:    https://unagidojyou.com
+// 2026 by Unagi Dojyou:    https://unagidojyou.com
 
 #pragma once
 

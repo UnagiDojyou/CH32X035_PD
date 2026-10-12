@@ -28,6 +28,7 @@
 // Reset (RST) functions available:
 // --------------------------------
 // RST_now()                conduct software reset
+// RST_bootloader()         reset into the factory bootloader
 // RST_clearFlags()         clear all reset flags
 // RST_wasLowPower()        check if last reset was caused by low power
 // RST_wasWWDG()            check if last reset was caused by window watchdog
@@ -173,6 +174,16 @@ void DLY_ticks(uint32_t n);                             // delay n system ticks
 // Reset (RST) Functions
 // ===================================================================================
 #define RST_now()         PFIC->CFGR    = PFIC_RESETSYS | PFIC_KEY3
+// Select BOOT startup before requesting a software reset (WCH SDK sequence).
+#define RST_bootloader()                                  \
+  FLASH->KEYR = BOOT_MODEKEYP_MODEKEYR1;                  \
+  FLASH->KEYR = BOOT_MODEKEYP_MODEKEYR2;                  \
+  FLASH->BOOT_MODEKEYR = BOOT_MODEKEYP_MODEKEYR1;         \
+  FLASH->BOOT_MODEKEYR = BOOT_MODEKEYP_MODEKEYR2;         \
+  FLASH->STATR |= FLASH_STATR_BOOT_MODE;                 \
+  FLASH->CTLR |= FLASH_CTLR_LOCK;                        \
+  RST_now();
+
 #define RST_clearFlags()  RCC->RSTSCKR |= RCC_RMVF
 #define RST_wasLowPower() (RCC->RSTSCKR & RCC_LPWRRSTF)
 #define RST_wasWWDG()     (RCC->RSTSCKR & RCC_WWDGRSTF)

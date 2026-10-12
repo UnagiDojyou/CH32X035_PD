@@ -10,6 +10,39 @@
 #define TARGET_CURRENT    2000            // define target current in milliampere
 #define PIN_ONOFF PA5
 
+static void CDC_reset_bootloader(void) {
+  DLY_ms(100);
+  RST_bootloader();
+}
+
+// Match a complete line across CDC packets. Reject extra or mismatched characters.
+static void CDC_poll_commands(void) {
+  static const char command[] = "bootloader";
+  static uint8_t position = 0;
+  static uint8_t invalid = 0;
+  while (CDC_available()) {
+    char c = CDC_read();
+    if (c == '\r' || c == '\n') {
+      uint8_t boot = !invalid && position == sizeof(command) - 1;
+      position = 0;
+      invalid = 0;
+      if (boot) CDC_reset_bootloader();
+    } else if (!invalid) {
+      if (position < sizeof(command) - 1 && c == command[position]) position++;
+      else invalid = 1;
+    }
+  }
+}
+
+// Keep the bootloader command available when a PD operation fails.
+static void CDC_wait_commands(void) __attribute__((noreturn));
+static void CDC_wait_commands(void) {
+  while (1) {
+    CDC_poll_commands();
+    DLY_ms(1);
+  }
+}
+
 void print_PDO_list() {
   CDC_println("PDO List:");
   for (uint8_t i = 1; i <= PD_getPDONum(); i++) {
@@ -80,6 +113,7 @@ int main(void) {
   uint8_t count = 0;
   CDC_init();
   while (!PD_connect()) {
+    CDC_poll_commands();
     count++;
     if (count > 10) {
       CDC_print(".");
@@ -96,7 +130,7 @@ int main(void) {
     DLY_ms(1000);
   } else {
     CDC_println("Fail to set 5V");
-    while(1);
+    CDC_wait_commands();
   }
 
   if (PD_getEPRCapable()) {
@@ -104,6 +138,7 @@ int main(void) {
       CDC_println("EPR Mode Set");
       print_PDO_list();
       for (uint16_t i = 0; i < 1000; i++) {
+        CDC_poll_commands();
         PD_Loop();
         DLY_ms(1);
       }
@@ -111,11 +146,11 @@ int main(void) {
         CDC_println("EPR Mode exit");
       }else {
         CDC_println("Fail to exit EPR Mode!");
-        while(1);
+        CDC_wait_commands();
       }
     } else {
       CDC_println("Fail to set EPR Mode!");
-      while(1);
+      CDC_wait_commands();
     }
   } else {
     CDC_println("EPR Mode is not supported");
@@ -129,10 +164,11 @@ int main(void) {
   } else {
     CDC_printD(TARGET_VOLTAGE);
     CDC_println(" mV Set Failed");
-    while(1);
+    CDC_wait_commands();
   }
 
   while (1) {
+    CDC_poll_commands();
     if (PD_Loop()) {
       PD_setMismatch(0);
       if (PD_setVoltage(TARGET_VOLTAGE)) {

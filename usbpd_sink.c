@@ -4,7 +4,7 @@
 //
 // Reference:               https://github.com/openwch/ch32x035
 // 2023 by Stefan Wagner:   https://github.com/wagiminator
-// 2025 by Unagi Dojyou:    https://unagidojyou.com
+// 2026 by Unagi Dojyou:    https://unagidojyou.com
 
 #include "usbpd_sink.h"
 #include <system.h>
@@ -571,7 +571,9 @@ void PD_PDO_analyze(void) {
         PD_control.EPRAVSSourceCap[PD_control.SourceEPRAVSNum].MaxVoltage = POWER_DECODE_100MV(test.SourceEPRAVSPDO.MaxVoltageIn100mVincrements);
         PD_control.EPRAVSSourceCap[PD_control.SourceEPRAVSNum].PDP        = test.SourceEPRAVSPDO.MaxPowerIn1Wincrements;
         PD_control.EPRAVSSourceCap[PD_control.SourceEPRAVSNum].Index      = i + 1;
-        PD_control.SourceEPRAVSNum++;
+        if (PD_control.EPRAVSSourceCap[PD_control.SourceEPRAVSNum].MinVoltage && PD_control.EPRAVSSourceCap[PD_control.SourceEPRAVSNum].MaxVoltage && PD_control.EPRAVSSourceCap[PD_control.SourceEPRAVSNum].PDP) {
+          PD_control.SourceEPRAVSNum++;
+        }
        }
     }
     // Check for SPR AVS (Augmented 11b, Subtype 10b)
@@ -587,7 +589,9 @@ void PD_PDO_analyze(void) {
             PD_control.SPRAVSSourceCap[PD_control.SourceSPRAVSNum].MaxVoltage  = 15000;
         }
         PD_control.SPRAVSSourceCap[PD_control.SourceSPRAVSNum].Index           = i + 1;
-        PD_control.SourceSPRAVSNum++;
+        if (PD_control.SPRAVSSourceCap[PD_control.SourceSPRAVSNum].Current_9to15V) {
+          PD_control.SourceSPRAVSNum++;
+        }
       }
     }
     // Check for PPS (Augmented 11b, Subtype 00b)
@@ -598,7 +602,9 @@ void PD_PDO_analyze(void) {
         PD_control.PPSSourceCap[PD_control.SourcePPSNum].Current         = POWER_DECODE_50MA(test.SourcePPSPDO.MaxCurrentIn50mAincrements);
         PD_control.PPSSourceCap[PD_control.SourcePPSNum].PPSPowerLimited = test.SourcePPSPDO.PPSpowerLimited;
         PD_control.PPSSourceCap[PD_control.SourcePPSNum].Index           = i + 1;
-        PD_control.SourcePPSNum++;
+        if (PD_control.PPSSourceCap[PD_control.SourcePPSNum].MaxVoltage && PD_control.PPSSourceCap[PD_control.SourcePPSNum].MinVoltage && PD_control.PPSSourceCap[PD_control.SourcePPSNum].Current) {
+          PD_control.SourcePPSNum++;
+        }
       }
     }
     else if ((test.SourceFixedPDO.FixedSupply==0u) && (test.SourceFixedPDO.VoltageIn50mVunits > 0)) {
@@ -610,7 +616,9 @@ void PD_PDO_analyze(void) {
         PD_control.FixedSourceCap[PD_control.SourceFixedNum].Current = POWER_DECODE_10MA(test.SourceFixedPDO.MaxCurrentIn10mAunits);
         PD_control.FixedSourceCap[PD_control.SourceFixedNum].Voltage = POWER_DECODE_50MV(test.SourceFixedPDO.VoltageIn50mVunits);
         PD_control.FixedSourceCap[PD_control.SourceFixedNum].Index   = i + 1;
-        PD_control.SourceFixedNum++;
+        if (PD_control.FixedSourceCap[PD_control.SourceFixedNum].Current && PD_control.FixedSourceCap[PD_control.SourceFixedNum].Voltage){
+          PD_control.SourceFixedNum++;
+        }
       }
     }
   }
