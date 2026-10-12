@@ -2,6 +2,9 @@
 USB PD 3.2 Library for CH32X035
 It supports EPR mode, EPR AVS, SPR AVS, and more.
 
+# Dual USB CDC
+It supports two CDC ports.
+
 # License
 The software in this repository is based on wagiminator's  
 * Development-Boards  

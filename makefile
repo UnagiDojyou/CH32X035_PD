@@ -12,6 +12,7 @@ MAINFILE = pd_vbus.c
 TARGET   = pd_vbus
 INCLUDE  = include
 TOOLS    = tools
+TEST	 = test
 
 # Microcontroller Settings
 F_CPU    = 48000000
@@ -33,6 +34,8 @@ CFLAGS   = -g -Os -flto -ffunction-sections -fno-builtin -nostdlib -Wall
 CFLAGS  += $(CPUARCH) -DF_CPU=$(F_CPU) -I$(NEWLIB) -I$(INCLUDE) -I.
 LDFLAGS  = -T$(LDSCRIPT) -L$(INCLUDE)/libgcc -lgcc -Wl,--gc-sections
 CFILES   = $(wildcard *.c) $(wildcard $(INCLUDE)/*.c) $(wildcard $(INCLUDE)/*.S)
+HFILES   = $(wildcard *.h) $(wildcard $(INCLUDE)/*.h)
+CDC_TEST_CFILES = $(TEST)/usb_cdc_echo.c $(filter-out $(wildcard *.c),$(CFILES))
 
 # Symbolic Targets
 help:
@@ -44,9 +47,9 @@ help:
 	@echo "make flash     compile and upload to MCU"
 	@echo "make clean     remove all build files"
 
-$(TARGET).elf: $(CFILES)
+$(TARGET).elf: $(CFILES) $(HFILES) $(LDSCRIPT) makefile
 	@echo "Building $(TARGET).elf ..."
-	@$(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
+	@$(CC) -o $@ $(CFILES) $(CFLAGS) $(LDFLAGS)
 
 $(TARGET).lst: $(TARGET).elf
 	@echo "Building $(TARGET).lst ..."
@@ -85,7 +88,7 @@ flash:	$(TARGET).bin size removeelf
 clean:
 	@echo "Cleaning all up ..."
 	@$(CLEAN)
-	@rm -f $(TARGET).elf $(TARGET).bin $(TARGET).hex $(TARGET).asm
+	@rm -f $(TARGET).elf $(TARGET).bin $(TARGET).hex $(TARGET).asm usb_cdc_echo.elf usb_cdc_echo.bin
 
 size:
 	@echo "------------------"
@@ -100,3 +103,14 @@ removetemp:
 removeelf:
 	@echo "Removing $(TARGET).elf ..."
 	@rm -f $(TARGET).elf
+
+# Separate dual-CDC echo firmware for hardware testing (does not negotiate PD).
+.PHONY: cdc-test
+cdc-test: usb_cdc_echo.bin
+
+usb_cdc_echo.elf: $(CDC_TEST_CFILES) $(HFILES) $(LDSCRIPT) makefile
+	@echo "Building $@ ..."
+	@$(CC) -o $@ $(CDC_TEST_CFILES) $(CFLAGS) $(LDFLAGS)
+
+usb_cdc_echo.bin: usb_cdc_echo.elf
+	@$(OBJCOPY) -O binary $< $@
