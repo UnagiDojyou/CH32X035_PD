@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Hardware checks for dual CDC. Needs pyserial; --usb also needs PyUSB access.
 
-Default: production firmware (CDC2 echoes). --echo-both: usb_cdc_echo firmware.
+Use --echo-both with usb_cdc_echo firmware. For production PD firmware,
+use test_pd_cdc.py instead; CDC2 no longer echoes.
 The USB checks temporarily detach Linux CDC drivers, then reattach them.
 """
 import argparse
@@ -242,6 +243,8 @@ if __name__ == '__main__':
     parser.add_argument('--echo-both', action='store_true', help='test usb_cdc_echo firmware')
     parser.add_argument('--usb', action='store_true', help='also run raw USB control/reset tests')
     args = parser.parse_args()
+    if not args.echo_both:
+        parser.error("Requires usb_cdc_echo firmware and --echo-both; use test_pd_cdc.py for PD firmware")
     serial_checks(args.echo_both)
     if args.usb:
         usb_checks(args.echo_both)

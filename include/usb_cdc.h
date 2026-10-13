@@ -3,7 +3,8 @@
 // ===================================================================================
 //
 // Functions below use the first port; CDC2_* uses the second port.
-// Call from main code; USB callbacks share state with these functions.
+// Nonblocking writes/flush may run in ISRs when the hooks serialize all writers.
+// Blocking reads belong in main code; see the critical-section hooks below.
 // Functions available:
 // --------------------
 // CDC_init()               setup USB CDC
@@ -50,6 +51,14 @@ extern "C" {
 // ===================================================================================
 // CDC Parameters
 // ===================================================================================
+// Allocated ring sizes (one slot is unused). Override in config.h.
+#ifndef CDC_TX_BUFFER_SIZE
+#define CDC_TX_BUFFER_SIZE 256
+#endif
+#ifndef CDC2_TX_BUFFER_SIZE
+#define CDC2_TX_BUFFER_SIZE 256
+#endif
+
 #define CDC_PRINT       1         // 1: include print functions (needs print.h)
 
 // ===================================================================================
@@ -62,7 +71,7 @@ void CDC_write(char c);           // queue one TX character, drop if full
 uint8_t CDC_available(void);      // number of buffered RX bytes
 uint8_t CDC_ready(void);          // TX queue has room and USB is configured
 
-// Writes never wait for the host. The 255-byte queue drops new bytes when full.
+// Writes never wait for the host. write() drops new bytes when the queue is full.
 // Use tryWrite for lossless streams: retry later without consuming the source byte.
 uint8_t CDC_tryWrite(char c);       // return 1 if queued, 0 if full/unconfigured
 uint8_t CDC_tryRead(char* c);       // return 1 if read, 0 if empty/unconfigured
@@ -77,6 +86,41 @@ uint8_t CDC2_ready(void);
 uint8_t CDC2_tryWrite(char c);
 uint8_t CDC2_tryRead(char* c);
 uint32_t CDC2_dropped(void);
+
+// Atomic bulk writes: queue all bytes or none, automatically schedule even a
+// short transfer, and return without waiting for the host. Zero length is a
+// successful no-op. writeBuffer counts rejected bytes; tryWriteBuffer does not.
+uint8_t CDC_writeBuffer(const void* data, uint16_t length);
+uint8_t CDC2_writeBuffer(const void* data, uint16_t length);
+uint8_t CDC_tryWriteBuffer(const void* data, uint16_t length);
+uint8_t CDC2_tryWriteBuffer(const void* data, uint16_t length);
+uint16_t CDC_writeAvailable(void);   // free ring bytes; 0 when unconfigured
+uint16_t CDC2_writeAvailable(void);
+
+// Direct writes without an intermediate buffer. After a successful reservation,
+// fill both spans and immediately commit or cancel in the SAME call context.
+// Critical-section protection remains held: do not wait, return to the event
+// loop, call other CDC APIs, or start a nested reservation. Private fields must
+// not be modified. Failed reservations count rejected bytes like writeBuffer.
+// Both ports share commit/cancel; zero-length reservations are rejected.
+typedef struct {
+  uint8_t* data[2];
+  uint16_t length[2];
+  uint32_t _criticalState;
+  uint16_t _next;
+  uint8_t _port;
+  uint8_t _active;
+} CDC_TX_RESERVATION;
+uint8_t CDC_reserveWrite(uint16_t length, CDC_TX_RESERVATION* tx);
+uint8_t CDC2_reserveWrite(uint16_t length, CDC_TX_RESERVATION* tx);
+void CDC_commitWrite(CDC_TX_RESERVATION* tx);
+void CDC_cancelWrite(CDC_TX_RESERVATION* tx);
+
+// Weak defaults mask/restore USBFS IRQ only. Applications with non-USB ISR
+// writers override BOTH hooks to serialize all producers and USB callbacks.
+// Preserve pre-existing IRQ state; the uint32_t token is application-defined.
+uint32_t CDC_enterCritical(void);
+void CDC_leaveCritical(uint32_t state);
 
 #define CDC2_writeflush(c)        {CDC2_write(c);CDC2_flush();}
 #define CDC2_newline()            {CDC2_write('\n');CDC2_flush();}

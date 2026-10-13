@@ -8,6 +8,7 @@
 
 #include "usbpd_sink.h"
 #include <system.h>
+#include <usb_cdc.h>
 
 // Variables
 static pd_control_t PD_control = {
@@ -1179,6 +1180,38 @@ void PD_RX_analyze(void) {
   }
 }
 
+// Serialize the application ISR producer with main code and USB callbacks.
+// The generic CDC library only masks USBFS unless these hooks are overridden.
+uint32_t CDC_enterCritical(void) {
+  uint32_t state = NVIC_GetStatusIRQ(USBFS_IRQn);
+  state |= NVIC_GetStatusIRQ(USBPD_IRQn) << 1;
+  NVIC_DisableIRQ(USBFS_IRQn);
+  NVIC_DisableIRQ(USBPD_IRQn);
+  return state;
+}
+
+void CDC_leaveCritical(uint32_t state) {
+  if(state & 2) NVIC_EnableIRQ(USBPD_IRQn);
+  if(state & 1) NVIC_EnableIRQ(USBFS_IRQn);
+}
+
+// PD-specific encoding lives here. Fill the generic queue's two free spans
+// directly, then atomically publish N+1 bytes: [SOP:2][zero:6][PD bytes:N*8].
+static uint8_t PD_logPacket(uint8_t sop, const uint8_t* data, uint16_t length) {
+  if(!sop || sop > 3 || !length || length > sizeof(PD_TR_buffer)) return 0;
+  CDC_TX_RESERVATION tx;
+  if(!CDC2_reserveWrite(length + 1, &tx)) return 0;
+  uint16_t index = 0;
+  for(uint8_t span = 0; span < 2; span++) {
+    for(uint16_t i = 0; i < tx.length[span]; i++) {
+      tx.data[span][i] = index ? data[index - 1] : sop << 6;
+      index++;
+    }
+  }
+  CDC_commitWrite(&tx);
+  return 1;
+}
+
 // ===================================================================================
 // USB PD Interrupt Service Routine
 // ===================================================================================
@@ -1188,12 +1221,17 @@ void USBPD_IRQHandler(void) {
   // Receive complete interrupt
   if(USBPD->STATUS & USBPD_IF_RX_ACT) {
     uint8_t status = (USBPD->STATUS & USBPD_BMC_AUX);
+    uint16_t length = USBPD->BMC_BYTE_CNT;
+    PD_logPacket(status, PD_TR_buffer, length);
     if(status == USBPD_BMC_AUX_SOP0) {
-      if(USBPD->BMC_BYTE_CNT >= 6) {
+      if(length >= 6 && length <= sizeof(PD_TR_buffer)) {
         PD_RX_analyze();
       }
     }
     USBPD->STATUS |= USBPD_IF_RX_ACT;
+    // SOP'/SOP'' (and received GoodCRC) have no local GoodCRC TX completion
+    // to re-arm reception. Do not interrupt a GoodCRC currently being sent.
+    if(!(USBPD->CONTROL & USBPD_PD_TX_EN)) PD_RX_mode();
   }
 
   // Transmit complete interrupt (GoodCRC only)

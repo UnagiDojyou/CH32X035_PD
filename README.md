@@ -4,6 +4,7 @@ It supports EPR mode, EPR AVS, SPR AVS, and more.
 
 # Dual USB CDC
 It supports two CDC ports.
+CDC2 streams received PD packets with a packed two-bit SOP prefix; echo is disabled.
 
 # License
 The software in this repository is based on wagiminator's  

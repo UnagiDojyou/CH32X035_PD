@@ -9,20 +9,21 @@
 // ===================================================================================
 #define CDC_PORTS                 2
 #define CDC_PACKET_SIZE           64
-#define CDC_WRITE_BUF_SIZE        256      // 255 usable bytes, uint8_t pointers wrap
 #define SET_LINE_CODING           0x20
 #define GET_LINE_CODING           0x21
 #define SET_CONTROL_LINE_STATE    0x22
 
 volatile CDC_LINE_CODING_TYPE CDC_lineCodings[CDC_PORTS];
 volatile uint8_t CDC_controlLineStates[CDC_PORTS];
+_Static_assert(CDC_TX_BUFFER_SIZE >= 2 && CDC_TX_BUFFER_SIZE <= 65535, "Invalid CDC TX size");
+_Static_assert(CDC2_TX_BUFFER_SIZE >= 2 && CDC2_TX_BUFFER_SIZE <= 65535, "Invalid CDC2 TX size");
 _Static_assert(sizeof(CDC_LINE_CODING_TYPE) == 7, "CDC line coding must be 7 bytes");
 
 typedef struct {
   uint8_t readByteCount;
   uint8_t readPointer;
-  uint8_t writePointer;
-  uint8_t writeReadPointer;
+  uint16_t writePointer;
+  uint16_t writeReadPointer;
   uint8_t writeBusyFlag;
   uint8_t flushPending;
   uint8_t writeZLP;
@@ -32,7 +33,10 @@ typedef struct {
 } CDC_STATE_TYPE;
 
 static volatile CDC_STATE_TYPE CDC_state[CDC_PORTS];
-static uint8_t CDC_writeBuffer[CDC_PORTS][CDC_WRITE_BUF_SIZE];
+static uint8_t CDC_txBuffers1[CDC_TX_BUFFER_SIZE];
+static uint8_t CDC_txBuffers2[CDC2_TX_BUFFER_SIZE];
+static uint8_t* const CDC_txBuffers[CDC_PORTS] = {CDC_txBuffers1, CDC_txBuffers2};
+static const uint16_t CDC_txBufferSizes[CDC_PORTS] = {CDC_TX_BUFFER_SIZE, CDC2_TX_BUFFER_SIZE};
 static uint8_t CDC_setupPort;               // survives overwriting EP0 with OUT data
 
 // Endpoints 2 and 3 use OUT at DMA+0 and IN at DMA+64.
@@ -51,30 +55,58 @@ static volatile uint16_t* const CDC_notifyLengths[CDC_PORTS] = {
   &USBFSD->UEP1_TX_LEN, &USBFSD->UEP5_TX_LEN
 };
 
-// Only USB shares these buffers with main code; leave PD interrupts enabled.
-static uint8_t CDC_lock(void) {
-  uint8_t enabled = NVIC_GetStatusIRQ(USBFS_IRQn);
+// Default serialization with USB callbacks. Applications with other ISR writers
+// override these hooks to mask their producers as well, preserving prior state.
+uint32_t CDC_enterCritical(void) __attribute__((weak));
+uint32_t CDC_enterCritical(void) {
+  uint32_t enabled = NVIC_GetStatusIRQ(USBFS_IRQn);
   NVIC_DisableIRQ(USBFS_IRQn);
-  asm volatile("" ::: "memory");
   return enabled;
 }
 
-static void CDC_unlock(uint8_t enabled) {
+void CDC_leaveCritical(uint32_t state) __attribute__((weak));
+void CDC_leaveCritical(uint32_t state) {
+  if(state) NVIC_EnableIRQ(USBFS_IRQn);
+}
+
+static uint32_t CDC_lock(void) {
+  uint32_t state = CDC_enterCritical();
   asm volatile("" ::: "memory");
-  if(enabled) NVIC_EnableIRQ(USBFS_IRQn);
+  return state;
+}
+
+static void CDC_unlock(uint32_t state) {
+  asm volatile("" ::: "memory");
+  CDC_leaveCritical(state);
+}
+
+static uint16_t CDC_next(uint8_t port, uint16_t pointer) {
+  return ++pointer == CDC_txBufferSizes[port] ? 0 : pointer;
+}
+
+static uint16_t CDC_count(uint8_t port) {
+  uint16_t write = CDC_state[port].writePointer;
+  uint16_t read = CDC_state[port].writeReadPointer;
+  return write >= read ? write - read : CDC_txBufferSizes[port] - read + write;
 }
 
 // Caller runs in the USB ISR or with the USB interrupt disabled.
 static void CDC_send(uint8_t port) {
   volatile CDC_STATE_TYPE* state = &CDC_state[port];
-  uint8_t count = state->writePointer - state->writeReadPointer;
+  uint16_t count = CDC_count(port);
   uint8_t len;
   if(!USB_Config || state->writeBusyFlag ||
      (*CDC_controls[port] & USBFS_UEP_T_RES_MASK) == USBFS_UEP_T_RES_STALL) return;
   if(count && (count >= CDC_PACKET_SIZE || state->flushPending)) {
     len = count > CDC_PACKET_SIZE ? CDC_PACKET_SIZE : count;
-    for(uint8_t i = 0; i < len; i++)
-      CDC_buffers[port][64 + i] = CDC_writeBuffer[port][state->writeReadPointer++];
+    uint16_t read = state->writeReadPointer;
+    for(uint8_t i = 0; i < len; i++) {
+      CDC_buffers[port][64 + i] = CDC_txBuffers[port][read];
+      read = CDC_next(port, read);
+    }
+    // Publish only after copying. Other producers still see these bytes as occupied.
+    asm volatile("" ::: "memory");
+    state->writeReadPointer = read;
   } else if(state->writeZLP) len = 0;        // terminate a full-size USB transfer
   else {
     if(!count) state->flushPending = 0;
@@ -112,40 +144,41 @@ void CDC_init(void) {
 }
 
 static uint8_t CDC_portReady(uint8_t port) {
-  return USB_Config && (uint8_t)(CDC_state[port].writePointer + 1) != CDC_state[port].writeReadPointer;
+  return USB_Config && CDC_next(port, CDC_state[port].writePointer) != CDC_state[port].writeReadPointer;
 }
 
 static uint8_t CDC_queueWrite(uint8_t port, char c) {
   uint8_t ready = CDC_portReady(port);
   if(ready) {
-    CDC_writeBuffer[port][CDC_state[port].writePointer++] = c;
+    CDC_txBuffers[port][CDC_state[port].writePointer] = c;
+    CDC_state[port].writePointer = CDC_next(port, CDC_state[port].writePointer);
     CDC_send(port);
   }
   return ready;
 }
 
 static uint8_t CDC_portTryWrite(uint8_t port, char c) {
-  uint8_t enabled = CDC_lock();
+  uint32_t enabled = CDC_lock();
   uint8_t ready = CDC_queueWrite(port, c);
   CDC_unlock(enabled);
   return ready;
 }
 
 static void CDC_portWrite(uint8_t port, char c) {
-  uint8_t enabled = CDC_lock();
+  uint32_t enabled = CDC_lock();
   if(!CDC_queueWrite(port, c)) CDC_state[port].dropped++;
   CDC_unlock(enabled);
 }
 
 static void CDC_portFlush(uint8_t port) {
-  uint8_t enabled = CDC_lock();
+  uint32_t enabled = CDC_lock();
   CDC_state[port].flushPending = 1;
   CDC_send(port);
   CDC_unlock(enabled);
 }
 
 static uint8_t CDC_portTryRead(uint8_t port, char* c) {
-  uint8_t enabled = CDC_lock();
+  uint32_t enabled = CDC_lock();
   uint8_t available = USB_Config && CDC_state[port].readByteCount;
   if(available) {
     *c = CDC_buffers[port][CDC_state[port].readPointer++];
@@ -167,6 +200,93 @@ uint8_t CDC_tryRead(char* c) { return CDC_portTryRead(0, c); }
 uint8_t CDC2_tryRead(char* c){ return CDC_portTryRead(1, c); }
 uint32_t CDC_dropped(void)  { return CDC_state[0].dropped; }
 uint32_t CDC2_dropped(void) { return CDC_state[1].dropped; }
+
+// A reservation keeps the critical section until commit/cancel. Only the
+// published write pointer is visible to USB; free spans may be filled directly.
+static uint8_t CDC_portReserve(uint8_t port, uint16_t length, CDC_TX_RESERVATION* tx,
+                               uint8_t countDropped) {
+  if(!tx) return 0;
+  tx->_active = 0;
+  uint32_t state = CDC_lock();
+  uint16_t free = CDC_txBufferSizes[port] - 1 - CDC_count(port);
+  if(!USB_Config || !length || length > free) {
+    if(countDropped) CDC_state[port].dropped += length;
+    CDC_unlock(state);
+    return 0;
+  }
+  uint16_t write = CDC_state[port].writePointer;
+  uint16_t first = CDC_txBufferSizes[port] - write;
+  if(first > length) first = length;
+  tx->data[0] = CDC_txBuffers[port] + write;
+  tx->length[0] = first;
+  tx->data[1] = CDC_txBuffers[port];
+  tx->length[1] = length - first;
+  tx->_next = tx->length[1] ? tx->length[1] : CDC_next(port, write + first - 1);
+  tx->_criticalState = state;
+  tx->_port = port;
+  tx->_active = 1;
+  return 1;
+}
+
+uint8_t CDC_reserveWrite(uint16_t length, CDC_TX_RESERVATION* tx) {
+  return CDC_portReserve(0, length, tx, 1);
+}
+
+uint8_t CDC2_reserveWrite(uint16_t length, CDC_TX_RESERVATION* tx) {
+  return CDC_portReserve(1, length, tx, 1);
+}
+
+void CDC_commitWrite(CDC_TX_RESERVATION* tx) {
+  if(!tx || !tx->_active) return;
+  asm volatile("" ::: "memory");
+  CDC_state[tx->_port].writePointer = tx->_next;
+  CDC_state[tx->_port].flushPending = 1;
+  CDC_send(tx->_port);
+  tx->_active = 0;
+  CDC_unlock(tx->_criticalState);
+}
+
+void CDC_cancelWrite(CDC_TX_RESERVATION* tx) {
+  if(!tx || !tx->_active) return;
+  tx->_active = 0;
+  CDC_unlock(tx->_criticalState);
+}
+
+static uint8_t CDC_portWriteBuffer(uint8_t port, const void* data, uint16_t length,
+                                   uint8_t countDropped) {
+  if(!length) return 1;
+  if(!data) return 0;
+  CDC_TX_RESERVATION tx;
+  if(!CDC_portReserve(port, length, &tx, countDropped)) return 0;
+  const uint8_t* source = data;
+  for(uint8_t span = 0; span < 2; span++)
+    for(uint16_t i = 0; i < tx.length[span]; i++) tx.data[span][i] = *source++;
+  CDC_commitWrite(&tx);
+  return 1;
+}
+
+uint8_t CDC_writeBuffer(const void* data, uint16_t length) {
+  return CDC_portWriteBuffer(0, data, length, 1);
+}
+uint8_t CDC2_writeBuffer(const void* data, uint16_t length) {
+  return CDC_portWriteBuffer(1, data, length, 1);
+}
+uint8_t CDC_tryWriteBuffer(const void* data, uint16_t length) {
+  return CDC_portWriteBuffer(0, data, length, 0);
+}
+uint8_t CDC2_tryWriteBuffer(const void* data, uint16_t length) {
+  return CDC_portWriteBuffer(1, data, length, 0);
+}
+
+static uint16_t CDC_portWriteAvailable(uint8_t port) {
+  uint32_t state = CDC_lock();
+  uint16_t free = USB_Config ? CDC_txBufferSizes[port] - 1 - CDC_count(port) : 0;
+  CDC_unlock(state);
+  return free;
+}
+uint16_t CDC_writeAvailable(void) { return CDC_portWriteAvailable(0); }
+uint16_t CDC2_writeAvailable(void) { return CDC_portWriteAvailable(1); }
+
 void CDC_write(char c)      { CDC_portWrite(0, c); }
 void CDC2_write(char c)     { CDC_portWrite(1, c); }
 void CDC_flush(void)        { CDC_portFlush(0); }
@@ -180,6 +300,7 @@ char CDC2_read(void)        { char c; while(!CDC2_tryRead(&c)); return c; }
 // SET_INTERFACE also selects alternate setting 0 again: reset that interface's
 // DATA toggles and pending transfers, without changing the other interface/port.
 void CDC_EP_resetInterface(uint8_t interface) {
+  uint32_t enabled = CDC_lock();
   uint8_t port = interface / 2;
   volatile CDC_STATE_TYPE* state = &CDC_state[port];
   if(interface & 1) {
@@ -194,9 +315,11 @@ void CDC_EP_resetInterface(uint8_t interface) {
     *CDC_notifyLengths[port] = 0;
     state->notifyBusyFlag = state->notifyPending = 0;
   }
+  CDC_unlock(enabled);
 }
 
 void CDC_EP_init(void) {
+  uint32_t enabled = CDC_lock();
   USBFSD->UEP1_DMA    = (uint32_t)EP1_buffer;
   USBFSD->UEP2_DMA    = (uint32_t)EP2_buffer;
   USBFSD->UEP3_DMA    = (uint32_t)EP3_buffer;
@@ -218,6 +341,7 @@ void CDC_EP_init(void) {
     CDC_lineCodings[port].databits = 8;
   }
   CDC_setupPort = 0xff;
+  CDC_unlock(enabled);
 }
 
 uint8_t CDC_control(void) {
@@ -263,9 +387,11 @@ void CDC_EP0_OUT(void) {
 }
 
 static void CDC_portIN(uint8_t port) {
+  uint32_t enabled = CDC_lock();
   *CDC_controls[port] = (*CDC_controls[port] & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
   CDC_state[port].writeBusyFlag = 0;
   CDC_send(port);
+  CDC_unlock(enabled);
 }
 
 static void CDC_portOUT(uint8_t port) {
@@ -284,6 +410,7 @@ static void CDC_notifyIN(uint8_t port) {
 
 // Resume a packet already in DMA when the host clears ENDPOINT_HALT.
 void CDC_EP_clearHalt(uint8_t address) {
+  uint32_t enabled = CDC_lock();
   uint8_t port;
   if(address == 0x82 || address == 0x83) {
     port = (address == 0x83);
@@ -300,6 +427,7 @@ void CDC_EP_clearHalt(uint8_t address) {
       *CDC_notifyControls[port] = (*CDC_notifyControls[port] & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_ACK;
     else CDC_notify(port);
   }
+  CDC_unlock(enabled);
 }
 
 void CDC_EP1_IN(void)  { CDC_notifyIN(0); }

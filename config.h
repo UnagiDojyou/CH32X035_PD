@@ -27,3 +27,7 @@
 #define SERIAL_STR          "CH32X035CDC"
 #define INTERF_STR          "CDC-Serial"
 #define INTERF2_STR         "CDC-Serial 2"
+
+// Application TX ring sizes (one byte per ring is reserved for the full check).
+#define CDC_TX_BUFFER_SIZE  256    // CDC1: 255 usable bytes
+#define CDC2_TX_BUFFER_SIZE 266    // CDC2: 265 usable bytes
